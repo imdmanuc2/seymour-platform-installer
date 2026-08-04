@@ -190,13 +190,16 @@ def command_run(product_id: str, action: str) -> None:
         manifest=manifest,
     )
 
+    successful = result.get("status") == "simulated"
+
     output(
         {
-            "success": True,
+            "success": successful,
             "safeMode": True,
             "changesApplied": False,
             "operation": result,
-        }
+        },
+        0 if successful else 1,
     )
 
 
@@ -264,13 +267,16 @@ def command_operation_resume(operation_id: str) -> None:
         manifest=manifest,
     )
 
+    successful = result.get("status") == "simulated"
+
     output(
         {
-            "success": True,
+            "success": successful,
             "safeMode": True,
             "changesApplied": False,
             "operation": result,
-        }
+        },
+        0 if successful else 1,
     )
 
 
