@@ -1,0 +1,21 @@
+{
+  "package": 9,
+  "id": "rollback-execution-engine",
+  "name": "SPI Package 009 - Rollback Execution Engine",
+  "requires": {
+    "branch": "develop",
+    "minimumCommit": "98f56da",
+    "previousPackage": 8
+  },
+  "installs": [
+    "lib/lifecycle/rollback.py",
+    "tests/test_package_009.py",
+    "docs/ROLLBACK_EXECUTION_ENGINE.md"
+  ],
+  "modifies": [
+    "bin/spi",
+    "lib/lifecycle/transaction.py"
+  ],
+  "verification": [4, 5, 6, 7, 8, 9],
+  "safeMode": true
+}

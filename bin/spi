@@ -17,6 +17,10 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 from lifecycle.executor import LifecycleExecutor
 from lifecycle.preflight import validate_lifecycle_plan
+from lifecycle.rollback import (
+    execute_rollback_dry_run,
+    rollback_status,
+)
 from lifecycle.operation import summarize_operation
 from plugins.defaults import build_default_registry
 from adapters.model import list_adapters, require_adapter
@@ -337,6 +341,35 @@ def command_plan_check(
 
 
 
+def command_operation_rollback(operation_id: str) -> None:
+    store = StateStore(ROOT)
+    try:
+        operation = store.load_operation(operation_id)
+    except FileNotFoundError as exc:
+        output({"success": False, "error": str(exc)}, 1)
+
+    result = execute_rollback_dry_run(
+        operation=operation,
+        store=store,
+    )
+    completed = result["rollback"]["status"] == "completed"
+    output({
+        "success": completed,
+        "safeMode": True,
+        "changesApplied": False,
+        "operation": result,
+    }, 0 if completed else 1)
+
+
+def command_operation_rollback_status(operation_id: str) -> None:
+    store = StateStore(ROOT)
+    try:
+        operation = store.load_operation(operation_id)
+    except FileNotFoundError as exc:
+        output({"success": False, "error": str(exc)}, 1)
+    output(rollback_status(operation))
+
+
 def command_operation_summary(operation_id: str) -> None:
     store = StateStore(ROOT)
     try:
@@ -449,6 +482,8 @@ Operations:
   spi operation show <operation-id>
   spi operation evidence <operation-id>
   spi operation resume <operation-id>
+  spi operation rollback <operation-id>
+  spi operation rollback-status <operation-id>
   spi operation summary <operation-id>
   spi operation latest [product-id]
   spi operation timeline <operation-id>
@@ -523,6 +558,10 @@ def main() -> None:
             command_operation_evidence(operation_id)
         elif action == "resume":
             command_operation_resume(operation_id)
+        elif action == "rollback":
+            command_operation_rollback(operation_id)
+        elif action == "rollback-status":
+            command_operation_rollback_status(operation_id)
         elif action == "summary":
             command_operation_summary(operation_id)
         elif action == "timeline":
