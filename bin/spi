@@ -17,6 +17,9 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 from lifecycle.executor import LifecycleExecutor
 from plugins.defaults import build_default_registry
+from adapters.model import list_adapters, require_adapter
+from core.capabilities import ALL_CAPABILITIES
+from core.compatibility import validate_product
 from core.platform import detect_platform
 from state.store import StateStore
 
@@ -250,6 +253,37 @@ def command_operation_resume(operation_id: str) -> None:
     )
 
 
+
+def command_adapters() -> None:
+    adapters = list_adapters()
+    output({"success": True, "count": len(adapters), "adapters": adapters})
+
+
+def command_adapter_show(adapter_id: str) -> None:
+    try:
+        adapter = require_adapter(adapter_id)
+    except KeyError as exc:
+        output({"success": False, "error": str(exc)}, 1)
+    output(adapter.to_dict())
+
+
+def command_capabilities() -> None:
+    output({"success": True, "count": len(ALL_CAPABILITIES), "capabilities": list(ALL_CAPABILITIES)})
+
+
+def command_validate(product_id: str) -> None:
+    manifest = load_product(product_id)
+    adapter_id = detect_platform()["platform"]["adapter"]
+    validation = validate_product(manifest, adapter_id)
+    output({
+        "success": validation["compatible"],
+        "safeMode": True,
+        "changesApplied": False,
+        "validation": validation,
+    }, 0 if validation["compatible"] else 1)
+
+
+
 def command_doctor() -> None:
     detected = detect_platform()["platform"]
 
@@ -300,10 +334,16 @@ System:
   spi platform
   spi doctor
 
+Adapters:
+  spi adapters
+  spi adapter show <adapter-id>
+  spi capabilities
+
 Products:
   spi products
   spi product show <product-id>
   spi plan <product-id> [install|repair|upgrade]
+  spi validate <product-id>
 
 Dry-run lifecycle:
   spi run <product-id> [install|repair|upgrade]
@@ -330,11 +370,23 @@ def main() -> None:
     elif command == "platform":
         command_platform()
 
+    elif command == "adapters":
+        command_adapters()
+
+    elif command == "adapter" and len(args) >= 3 and args[1] == "show":
+        command_adapter_show(args[2])
+
+    elif command == "capabilities":
+        command_capabilities()
+
     elif command == "products":
         command_products()
 
     elif command == "product" and len(args) >= 3 and args[1] == "show":
         command_show(args[2])
+
+    elif command == "validate" and len(args) >= 2:
+        command_validate(args[1])
 
     elif command == "plan" and len(args) >= 2:
         command_plan(

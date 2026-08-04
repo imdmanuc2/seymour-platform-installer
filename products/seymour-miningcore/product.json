@@ -20,7 +20,21 @@
       "docker"
     ],
     "persistentStorage": true,
-    "database": "postgresql"
+    "database": "postgresql",
+    "capabilities": [
+      "containers",
+      "docker",
+      "docker-compose",
+      "persistent-storage",
+      "postgresql",
+      "secrets",
+      "identity",
+      "container-network",
+      "healthcheck",
+      "logging",
+      "backup",
+      "rollback"
+    ]
   },
   "lifecycle": {
     "install": [

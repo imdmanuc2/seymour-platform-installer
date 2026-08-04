@@ -7,3 +7,10 @@ state/evidence/*
 
 !state/operations/.gitkeep
 !state/evidence/.gitkeep
+
+# Local SPI development packages
+packages/*.zip
+packages/package-*/
+
+# Package rollback snapshots
+.spi-package-backups/
