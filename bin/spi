@@ -16,6 +16,7 @@ STATE = ROOT / "state"
 sys.path.insert(0, str(ROOT / "lib"))
 
 from lifecycle.executor import LifecycleExecutor
+from lifecycle.preflight import validate_lifecycle_plan
 from plugins.defaults import build_default_registry
 from adapters.model import list_adapters, require_adapter
 from core.capabilities import ALL_CAPABILITIES
@@ -152,6 +153,25 @@ def command_run(product_id: str, action: str) -> None:
             1,
         )
 
+    preflight = validate_lifecycle_plan(
+        manifest=manifest,
+        action=action,
+        adapter_id=detected["adapter"],
+    )
+
+    if not preflight["compatible"]:
+        output(
+            {
+                "success": False,
+                "safeMode": True,
+                "changesApplied": False,
+                "blocked": True,
+                "error": "Lifecycle plan failed capability validation.",
+                "validation": preflight,
+            },
+            1,
+        )
+
     store = StateStore(ROOT)
     registry = build_default_registry()
     executor = LifecycleExecutor(store, registry)
@@ -284,6 +304,31 @@ def command_validate(product_id: str) -> None:
 
 
 
+
+def command_plan_check(
+    product_id: str,
+    action: str = "install",
+) -> None:
+    manifest = load_product(product_id)
+    adapter_id = detect_platform()["platform"]["adapter"]
+
+    validation = validate_lifecycle_plan(
+        manifest=manifest,
+        action=action,
+        adapter_id=adapter_id,
+    )
+
+    output(
+        {
+            "success": validation["compatible"],
+            "safeMode": True,
+            "changesApplied": False,
+            "validation": validation,
+        },
+        0 if validation["compatible"] else 1,
+    )
+
+
 def command_doctor() -> None:
     detected = detect_platform()["platform"]
 
@@ -344,6 +389,7 @@ Products:
   spi product show <product-id>
   spi plan <product-id> [install|repair|upgrade]
   spi validate <product-id>
+  spi plan-check <product-id> [install|repair|upgrade]
 
 Dry-run lifecycle:
   spi run <product-id> [install|repair|upgrade]
@@ -387,6 +433,12 @@ def main() -> None:
 
     elif command == "validate" and len(args) >= 2:
         command_validate(args[1])
+
+    elif command == "plan-check" and len(args) >= 2:
+        command_plan_check(
+            args[1],
+            args[2] if len(args) >= 3 else "install",
+        )
 
     elif command == "plan" and len(args) >= 2:
         command_plan(
