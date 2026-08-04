@@ -16,6 +16,7 @@ STATE = ROOT / "state"
 sys.path.insert(0, str(ROOT / "lib"))
 
 from lifecycle.executor import LifecycleExecutor
+from plugins.defaults import build_default_registry
 from core.platform import detect_platform
 from state.store import StateStore
 
@@ -149,7 +150,8 @@ def command_run(product_id: str, action: str) -> None:
         )
 
     store = StateStore(ROOT)
-    executor = LifecycleExecutor(store)
+    registry = build_default_registry()
+    executor = LifecycleExecutor(store, registry)
 
     operation = store.create_operation(
         product=manifest["product"],
@@ -159,7 +161,10 @@ def command_run(product_id: str, action: str) -> None:
         dry_run=True,
     )
 
-    result = executor.execute_dry_run(operation)
+    result = executor.execute_dry_run(
+        operation,
+        manifest=manifest,
+    )
 
     output(
         {
@@ -215,7 +220,8 @@ def command_operation_evidence(operation_id: str) -> None:
 
 def command_operation_resume(operation_id: str) -> None:
     store = StateStore(ROOT)
-    executor = LifecycleExecutor(store)
+    registry = build_default_registry()
+    executor = LifecycleExecutor(store, registry)
 
     try:
         operation = store.load_operation(operation_id)
@@ -228,7 +234,11 @@ def command_operation_resume(operation_id: str) -> None:
             1,
         )
 
-    result = executor.resume_dry_run(operation)
+    manifest = load_product(operation['product']['id'])
+    result = executor.resume_dry_run(
+        operation,
+        manifest=manifest,
+    )
 
     output(
         {
