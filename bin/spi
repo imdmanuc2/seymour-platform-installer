@@ -1,22 +1,31 @@
 #!/usr/bin/env python3
 
+from __future__ import annotations
+
 import json
 import os
 import platform
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCTS = ROOT / "products"
 STATE = ROOT / "state"
 
+sys.path.insert(0, str(ROOT / "lib"))
 
-def output(data: dict, exit_code: int = 0) -> None:
+from lifecycle.executor import LifecycleExecutor
+from core.platform import detect_platform
+from state.store import StateStore
+
+
+def output(data: Any, exit_code: int = 0) -> None:
     print(json.dumps(data, indent=2))
     raise SystemExit(exit_code)
 
 
-def load_product(product_id: str) -> dict:
+def load_product(product_id: str) -> dict[str, Any]:
     path = PRODUCTS / product_id / "product.json"
 
     if not path.exists():
@@ -31,32 +40,54 @@ def load_product(product_id: str) -> dict:
     return json.loads(path.read_text())
 
 
-def command_version() -> None:
-    version = (ROOT / "VERSION").read_text().strip()
+def product_steps(
+    manifest: dict[str, Any],
+    action: str,
+) -> list[dict[str, Any]]:
+    lifecycle = manifest.get("lifecycle", {})
 
+    if action not in lifecycle:
+        output(
+            {
+                "success": False,
+                "error": (
+                    f"Product {manifest['product']['id']} "
+                    f"does not define lifecycle action: {action}"
+                ),
+            },
+            1,
+        )
+
+    return [
+        {
+            "step": number,
+            "key": key,
+            "status": "pending",
+        }
+        for number, key in enumerate(lifecycle[action], start=1)
+    ]
+
+
+def command_version() -> None:
     output(
         {
             "product": "Seymour Platform Installer",
             "command": "version",
-            "version": version,
+            "version": (ROOT / "VERSION").read_text().strip(),
         }
     )
 
 
 def command_platform() -> None:
-    sys.path.insert(0, str(ROOT / "lib"))
-
-    from spi_platform import detect_platform
-
     output(detect_platform())
 
 
 def command_products() -> None:
     products = []
 
-    for manifest in sorted(PRODUCTS.glob("*/product.json")):
-        data = json.loads(manifest.read_text())
-        product = data["product"]
+    for manifest_path in sorted(PRODUCTS.glob("*/product.json")):
+        manifest = json.loads(manifest_path.read_text())
+        product = manifest["product"]
 
         products.append(
             {
@@ -80,38 +111,138 @@ def command_show(product_id: str) -> None:
     output(load_product(product_id))
 
 
-def command_plan(product_id: str) -> None:
+def command_plan(product_id: str, action: str = "install") -> None:
     manifest = load_product(product_id)
-
-    steps = [
-        {
-            "step": number,
-            "key": key,
-            "status": "pending",
-        }
-        for number, key in enumerate(
-            manifest["lifecycle"]["install"],
-            start=1,
-        )
-    ]
 
     output(
         {
             "success": True,
             "mode": "plan",
+            "action": action,
             "safeMode": True,
             "changesApplied": False,
             "product": manifest["product"],
-            "target": {
-                "hostname": platform.node(),
-                "architecture": platform.machine(),
+            "target": detect_platform()["platform"],
+            "steps": product_steps(manifest, action),
+        }
+    )
+
+
+def command_run(product_id: str, action: str) -> None:
+    manifest = load_product(product_id)
+    detected = detect_platform()["platform"]
+
+    supported_adapters = manifest["requirements"].get(
+        "platformAdapters",
+        [],
+    )
+
+    if detected["adapter"] not in supported_adapters:
+        output(
+            {
+                "success": False,
+                "error": "Unsupported platform adapter",
+                "adapter": detected["adapter"],
+                "supportedAdapters": supported_adapters,
             },
-            "steps": steps,
+            1,
+        )
+
+    store = StateStore(ROOT)
+    executor = LifecycleExecutor(store)
+
+    operation = store.create_operation(
+        product=manifest["product"],
+        action=action,
+        adapter=detected["adapter"],
+        steps=product_steps(manifest, action),
+        dry_run=True,
+    )
+
+    result = executor.execute_dry_run(operation)
+
+    output(
+        {
+            "success": True,
+            "safeMode": True,
+            "changesApplied": False,
+            "operation": result,
+        }
+    )
+
+
+def command_operations() -> None:
+    store = StateStore(ROOT)
+    operations = store.list_operations()
+
+    output(
+        {
+            "success": True,
+            "count": len(operations),
+            "operations": operations,
+        }
+    )
+
+
+def command_operation_show(operation_id: str) -> None:
+    store = StateStore(ROOT)
+
+    try:
+        operation = store.load_operation(operation_id)
+    except FileNotFoundError as exc:
+        output(
+            {
+                "success": False,
+                "error": str(exc),
+            },
+            1,
+        )
+
+    output(operation)
+
+
+def command_operation_evidence(operation_id: str) -> None:
+    store = StateStore(ROOT)
+
+    output(
+        {
+            "success": True,
+            "operationId": operation_id,
+            "events": store.read_evidence(operation_id),
+        }
+    )
+
+
+def command_operation_resume(operation_id: str) -> None:
+    store = StateStore(ROOT)
+    executor = LifecycleExecutor(store)
+
+    try:
+        operation = store.load_operation(operation_id)
+    except FileNotFoundError as exc:
+        output(
+            {
+                "success": False,
+                "error": str(exc),
+            },
+            1,
+        )
+
+    result = executor.resume_dry_run(operation)
+
+    output(
+        {
+            "success": True,
+            "safeMode": True,
+            "changesApplied": False,
+            "operation": result,
         }
     )
 
 
 def command_doctor() -> None:
+    detected = detect_platform()["platform"]
+
     checks = [
         {
             "name": "python3",
@@ -129,6 +260,11 @@ def command_doctor() -> None:
             "name": "state-writable",
             "healthy": STATE.is_dir() and os.access(STATE, os.W_OK),
         },
+        {
+            "name": "platform-supported",
+            "healthy": detected["supported"],
+            "value": detected["adapter"],
+        },
     ]
 
     healthy = all(check["healthy"] for check in checks)
@@ -138,6 +274,7 @@ def command_doctor() -> None:
             "product": "Seymour Platform Installer",
             "ready": healthy,
             "safeMode": True,
+            "platform": detected,
             "checks": checks,
         },
         0 if healthy else 1,
@@ -148,15 +285,27 @@ def show_help() -> None:
     print(
         """Seymour Platform Installer
 
-Commands:
+System:
   spi version
   spi platform
-  spi products
-  spi product show <product-id>
-  spi plan <product-id>
   spi doctor
 
-Package 001 is read-only.
+Products:
+  spi products
+  spi product show <product-id>
+  spi plan <product-id> [install|repair|upgrade]
+
+Dry-run lifecycle:
+  spi run <product-id> [install|repair|upgrade]
+
+Operations:
+  spi operations
+  spi operation show <operation-id>
+  spi operation evidence <operation-id>
+  spi operation resume <operation-id>
+
+Package 002 is dry-run only.
+No live host, service, container, package, or storage changes are enabled.
 """
     )
 
@@ -167,18 +316,56 @@ def main() -> None:
 
     if command == "version":
         command_version()
+
     elif command == "platform":
         command_platform()
+
     elif command == "products":
         command_products()
+
     elif command == "product" and len(args) >= 3 and args[1] == "show":
         command_show(args[2])
+
     elif command == "plan" and len(args) >= 2:
-        command_plan(args[1])
+        command_plan(
+            args[1],
+            args[2] if len(args) >= 3 else "install",
+        )
+
+    elif command == "run" and len(args) >= 2:
+        command_run(
+            args[1],
+            args[2] if len(args) >= 3 else "install",
+        )
+
+    elif command == "operations":
+        command_operations()
+
+    elif command == "operation" and len(args) >= 3:
+        action = args[1]
+        operation_id = args[2]
+
+        if action == "show":
+            command_operation_show(operation_id)
+        elif action == "evidence":
+            command_operation_evidence(operation_id)
+        elif action == "resume":
+            command_operation_resume(operation_id)
+        else:
+            output(
+                {
+                    "success": False,
+                    "error": f"Unknown operation action: {action}",
+                },
+                1,
+            )
+
     elif command == "doctor":
         command_doctor()
+
     elif command in {"help", "--help", "-h"}:
         show_help()
+
     else:
         output(
             {
