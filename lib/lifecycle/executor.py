@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from lifecycle.operation import (
+    mark_operation_completed,
+    mark_operation_started,
+)
 from plugins.registry import PluginRegistry
 from state.store import StateStore
 
@@ -21,7 +25,7 @@ class LifecycleExecutor:
         *,
         manifest: dict[str, Any],
     ) -> dict[str, Any]:
-        operation["status"] = "running"
+        mark_operation_started(operation)
         self.store.save_operation(operation)
 
         self.store.append_evidence(
@@ -36,6 +40,8 @@ class LifecycleExecutor:
             "adapter": operation["adapter"],
             "manifest": manifest,
         }
+
+        failure_message: str | None = None
 
         for step in operation["steps"]:
             step_number = step["step"]
@@ -58,12 +64,12 @@ class LifecycleExecutor:
             plugin = self.registry.require(step_key)
 
             if not plugin.supports_adapter(operation["adapter"]):
-                step["status"] = "failed"
-                step["message"] = (
+                failure_message = (
                     f"Plugin {step_key} does not support "
                     f"adapter {operation['adapter']}"
                 )
-                operation["status"] = "failed"
+                step["status"] = "failed"
+                step["message"] = failure_message
                 self.store.save_operation(operation)
                 break
 
@@ -90,25 +96,46 @@ class LifecycleExecutor:
             )
 
             if not result.success:
-                operation["status"] = "failed"
-                self.store.save_operation(operation)
+                failure_message = result.message
                 break
 
-        if operation["status"] != "failed":
-            operation["status"] = "simulated"
+        if failure_message is not None:
+            mark_operation_completed(
+                operation,
+                status="failed",
+                success=False,
+                changed=False,
+                message=failure_message,
+                details={
+                    "changesApplied": False,
+                    "failedStep": operation.get("currentStep"),
+                },
+            )
+        else:
+            mark_operation_completed(
+                operation,
+                status="simulated",
+                success=True,
+                changed=False,
+                message="Plugin-based dry-run execution completed",
+                details={
+                    "changesApplied": False,
+                },
+            )
 
         self.store.save_operation(operation)
 
         self.store.append_evidence(
             operation["operationId"],
             event_type="operation-completed",
-            message=(
-                "Plugin-based dry-run execution completed "
-                f"with status {operation['status']}"
-            ),
+            message=operation["outcome"]["message"],
             details={
                 "changesApplied": False,
                 "status": operation["status"],
+                "outcome": operation["outcome"],
+                "durationMilliseconds": (
+                    operation["durationMilliseconds"]
+                ),
             },
         )
 

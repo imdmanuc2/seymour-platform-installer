@@ -17,6 +17,7 @@ sys.path.insert(0, str(ROOT / "lib"))
 
 from lifecycle.executor import LifecycleExecutor
 from lifecycle.preflight import validate_lifecycle_plan
+from lifecycle.operation import summarize_operation
 from plugins.defaults import build_default_registry
 from adapters.model import list_adapters, require_adapter
 from core.capabilities import ALL_CAPABILITIES
@@ -329,6 +330,49 @@ def command_plan_check(
     )
 
 
+
+def command_operation_summary(operation_id: str) -> None:
+    store = StateStore(ROOT)
+    try:
+        operation = store.load_operation(operation_id)
+    except FileNotFoundError as exc:
+        output({"success": False, "error": str(exc)}, 1)
+    output(summarize_operation(operation))
+
+
+def command_operation_latest(
+    product_id: str | None = None,
+) -> None:
+    store = StateStore(ROOT)
+    operations = store.list_operations()
+
+    if product_id is not None:
+        operations = [
+            operation
+            for operation in operations
+            if operation.get("product", {}).get("id") == product_id
+        ]
+
+    if not operations:
+        output({
+            "success": False,
+            "error": "No matching operations found.",
+        }, 1)
+
+    output(summarize_operation(operations[0]))
+
+
+def command_operation_timeline(operation_id: str) -> None:
+    store = StateStore(ROOT)
+    events = store.read_evidence(operation_id)
+    output({
+        "success": True,
+        "operationId": operation_id,
+        "count": len(events),
+        "events": events,
+    })
+
+
 def command_doctor() -> None:
     detected = detect_platform()["platform"]
 
@@ -399,6 +443,9 @@ Operations:
   spi operation show <operation-id>
   spi operation evidence <operation-id>
   spi operation resume <operation-id>
+  spi operation summary <operation-id>
+  spi operation latest [product-id]
+  spi operation timeline <operation-id>
 
 Package 002 is dry-run only.
 No live host, service, container, package, or storage changes are enabled.
@@ -455,6 +502,11 @@ def main() -> None:
     elif command == "operations":
         command_operations()
 
+    elif command == "operation" and len(args) >= 2 and args[1] == "latest":
+        command_operation_latest(
+            args[2] if len(args) >= 3 else None
+        )
+
     elif command == "operation" and len(args) >= 3:
         action = args[1]
         operation_id = args[2]
@@ -465,6 +517,10 @@ def main() -> None:
             command_operation_evidence(operation_id)
         elif action == "resume":
             command_operation_resume(operation_id)
+        elif action == "summary":
+            command_operation_summary(operation_id)
+        elif action == "timeline":
+            command_operation_timeline(operation_id)
         else:
             output(
                 {

@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from lifecycle.operation import initialize_operation_record
+
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
@@ -51,6 +53,7 @@ class StateStore:
             "steps": steps,
         }
 
+        initialize_operation_record(operation)
         self.save_operation(operation)
         self.append_evidence(
             operation_id,
@@ -79,7 +82,9 @@ class StateStore:
         if not path.exists():
             raise FileNotFoundError(f"Unknown operation: {operation_id}")
 
-        return json.loads(path.read_text())
+        return initialize_operation_record(
+            json.loads(path.read_text())
+        )
 
     def list_operations(self) -> list[dict[str, Any]]:
         operations = []
