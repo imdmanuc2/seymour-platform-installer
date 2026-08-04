@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from lifecycle.operation import initialize_operation_record
+from lifecycle.transaction import initialize_transaction
 
 
 def utc_now() -> str:
@@ -54,6 +55,7 @@ class StateStore:
         }
 
         initialize_operation_record(operation)
+        initialize_transaction(operation)
         self.save_operation(operation)
         self.append_evidence(
             operation_id,
@@ -82,9 +84,11 @@ class StateStore:
         if not path.exists():
             raise FileNotFoundError(f"Unknown operation: {operation_id}")
 
-        return initialize_operation_record(
+        operation = initialize_operation_record(
             json.loads(path.read_text())
         )
+        initialize_transaction(operation)
+        return operation
 
     def list_operations(self) -> list[dict[str, Any]]:
         operations = []

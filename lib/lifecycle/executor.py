@@ -3,6 +3,14 @@ from __future__ import annotations
 from typing import Any
 
 from lifecycle.failure_injection import should_inject_failure
+from lifecycle.crash_injection import should_inject_crash
+from lifecycle.transaction import (
+    commit_checkpoint,
+    create_checkpoint,
+    mark_transaction_completed,
+    mark_transaction_interrupted,
+    mark_transaction_started,
+)
 from lifecycle.operation import (
     mark_operation_completed,
     mark_operation_started,
@@ -38,7 +46,21 @@ class LifecycleExecutor:
         resumed: bool = False,
     ) -> dict[str, Any]:
         mark_operation_started(operation)
+        mark_transaction_started(operation)
         self.store.save_operation(operation)
+
+        self.store.append_evidence(
+            operation["operationId"],
+            event_type=("transaction-resumed" if resumed else "transaction-started"),
+            message=(
+                "Dry-run transaction resumed"
+                if resumed
+                else "Dry-run transaction started"
+            ),
+            details={
+                "transactionId": operation["transaction"]["transactionId"],
+            },
+        )
 
         self.store.append_evidence(
             operation["operationId"],
@@ -69,8 +91,25 @@ class LifecycleExecutor:
             step["attempts"] = attempt
             step["retryPolicy"] = policy.to_dict()
             operation["currentStep"] = step_number
+            checkpoint = create_checkpoint(
+                operation,
+                step_number=step_number,
+                plugin_key=step_key,
+            )
+            step["checkpointId"] = checkpoint["checkpointId"]
             step["status"] = "running"
             self.store.save_operation(operation)
+
+            self.store.append_evidence(
+                operation["operationId"],
+                event_type="checkpoint-prepared",
+                message=f"Prepared checkpoint for {step_key}.",
+                details={
+                    "step": step_number,
+                    "plugin": step_key,
+                    "checkpointId": checkpoint["checkpointId"],
+                },
+            )
 
             self.store.append_evidence(
                 operation["operationId"],
@@ -84,6 +123,38 @@ class LifecycleExecutor:
             )
 
             plugin = self.registry.require(step_key)
+
+            if should_inject_crash(plugin_key=step_key):
+                message = f"Injected transaction interruption for {step_key}."
+                step["status"] = "paused"
+                step["message"] = message
+                operation["status"] = "paused"
+                operation["completedAt"] = None
+                operation["durationMilliseconds"] = None
+                operation["outcome"] = {
+                    "success": False,
+                    "status": "paused",
+                    "changed": False,
+                    "message": message,
+                    "details": {
+                        "changesApplied": False,
+                        "interruptedStep": step_number,
+                    },
+                }
+                mark_transaction_interrupted(operation, message=message)
+                self.store.save_operation(operation)
+                self.store.append_evidence(
+                    operation["operationId"],
+                    event_type="transaction-interrupted",
+                    message=message,
+                    details={
+                        "step": step_number,
+                        "plugin": step_key,
+                        "transactionId": operation["transaction"]["transactionId"],
+                        "lastCommittedStep": operation["transaction"]["lastCommittedStep"],
+                    },
+                )
+                return operation
 
             if should_inject_failure(
                 plugin_key=step_key,
@@ -155,6 +226,22 @@ class LifecycleExecutor:
             step["pluginResult"] = result.to_dict()
             step.pop("lastError", None)
             self.store.save_operation(operation)
+
+            checkpoint = commit_checkpoint(
+                operation,
+                step_number=step_number,
+            )
+            self.store.save_operation(operation)
+            self.store.append_evidence(
+                operation["operationId"],
+                event_type="checkpoint-committed",
+                message=f"Committed checkpoint for {step_key}.",
+                details={
+                    "step": step_number,
+                    "plugin": step_key,
+                    "checkpointId": checkpoint["checkpointId"],
+                },
+            )
 
             self.store.append_evidence(
                 operation["operationId"],
@@ -238,7 +325,21 @@ class LifecycleExecutor:
                 },
             )
 
+        if operation["status"] == "simulated":
+            mark_transaction_completed(operation)
+
         self.store.save_operation(operation)
+
+        if operation["status"] == "simulated":
+            self.store.append_evidence(
+                operation["operationId"],
+                event_type="transaction-committed",
+                message="Dry-run transaction committed.",
+                details={
+                    "transactionId": operation["transaction"]["transactionId"],
+                    "lastCommittedStep": operation["transaction"]["lastCommittedStep"],
+                },
+            )
 
         self.store.append_evidence(
             operation["operationId"],
