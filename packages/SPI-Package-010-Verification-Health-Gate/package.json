@@ -1,0 +1,7 @@
+{
+  "package": "010",
+  "id": "verification-health-gate",
+  "name": "Verification & Health Gate Engine",
+  "requires": {"branch": "develop", "previousPackage": "009"},
+  "safeModeOnly": true
+}

@@ -3,6 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from lifecycle.failure_injection import should_inject_failure
+from lifecycle.health_gate import (
+    evaluate_health_gate,
+    mark_verification_failed,
+)
 from lifecycle.crash_injection import should_inject_crash
 from lifecycle.transaction import (
     commit_checkpoint,
@@ -300,6 +304,38 @@ class LifecycleExecutor:
                     self.store.save_operation(operation)
                     return operation
                 break
+
+        if failure_message is None:
+            self.store.append_evidence(
+                operation["operationId"],
+                event_type="health-gate-started",
+                message="Post-action verification started.",
+            )
+
+            health_gate = evaluate_health_gate(operation)
+
+            if health_gate["healthy"]:
+                self.store.append_evidence(
+                    operation["operationId"],
+                    event_type="health-gate-passed",
+                    message="Post-action verification passed.",
+                    details={"healthGate": health_gate},
+                )
+            else:
+                failure_message = (
+                    "Post-action verification failed: "
+                    + ", ".join(health_gate["failedChecks"])
+                )
+                mark_verification_failed(
+                    operation,
+                    health_gate=health_gate,
+                )
+                self.store.append_evidence(
+                    operation["operationId"],
+                    event_type="health-gate-failed",
+                    message=failure_message,
+                    details={"healthGate": health_gate},
+                )
 
         if failure_message is not None:
             mark_operation_completed(
