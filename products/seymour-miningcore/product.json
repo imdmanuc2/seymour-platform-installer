@@ -1,0 +1,54 @@
+{
+  "manifestVersion": 1,
+  "product": {
+    "id": "seymour-miningcore",
+    "name": "Seymour MiningCore",
+    "version": "0.9.1-alpha",
+    "status": "migration-candidate",
+    "sourceRepository": "git@github.com:imdmanuc2/seymour-miningcore.git"
+  },
+  "requirements": {
+    "architectures": [
+      "amd64",
+      "arm64",
+      "aarch64"
+    ],
+    "platformAdapters": [
+      "umbrel",
+      "debian",
+      "ubuntu",
+      "docker"
+    ],
+    "persistentStorage": true,
+    "database": "postgresql"
+  },
+  "lifecycle": {
+    "install": [
+      "detect-platform",
+      "validate-requirements",
+      "prepare-persistent-storage",
+      "deploy-postgresql",
+      "deploy-miningcore",
+      "generate-identity",
+      "generate-api-token",
+      "configure-pool",
+      "start-services",
+      "verify-health",
+      "register-with-nexus"
+    ],
+    "repair": [
+      "collect-diagnostics",
+      "restore-last-known-good-config",
+      "restart-unhealthy-components",
+      "verify-recovery"
+    ],
+    "upgrade": [
+      "create-backup",
+      "stage-release",
+      "validate-release",
+      "activate-release",
+      "verify-health",
+      "rollback-on-failure"
+    ]
+  }
+}
